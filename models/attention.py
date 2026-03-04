@@ -88,11 +88,19 @@ class ContentAwareAttentionModule(nn.Module):
     """
     CnAM (Content-Aware Attention Module).
     提取语义内容：空间自注意力，使输出保持 [B,C,H,W]，用于 MKAE 内容分支。
+    支持 chunk_size 分块计算，避免大分辨率时 OOM（256×256 batch=16 约需 16GB 显存）。
     """
 
-    def __init__(self, channels: int, head_dim: int = 64, num_heads: Optional[int] = None):
+    def __init__(
+        self,
+        channels: int,
+        head_dim: int = 64,
+        num_heads: Optional[int] = None,
+        chunk_size: Optional[int] = 2048,
+    ):
         super().__init__()
         self.channels = channels
+        self.chunk_size = chunk_size
         if num_heads is not None:
             self.num_heads = min(num_heads, channels)
         else:
@@ -106,12 +114,25 @@ class ContentAwareAttentionModule(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, C, H, W = x.shape
+        N = H * W
         qkv = self.qkv(x)
-        qkv = qkv.reshape(B, 3, self.num_heads, self.head_dim, H * W).permute(1, 0, 2, 4, 3)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        out = (attn @ v).transpose(-2, -1).reshape(B, C, H, W)
+        qkv = qkv.reshape(B, 3, self.num_heads, self.head_dim, N).permute(1, 0, 2, 4, 3)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # [B, heads, N, head_dim]
+
+        if self.chunk_size is None or self.chunk_size >= N:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            out = (attn @ v).transpose(-2, -1).reshape(B, C, H, W)
+        else:
+            out_chunks = []
+            for i in range(0, N, self.chunk_size):
+                end = min(i + self.chunk_size, N)
+                q_chunk = q[:, :, i:end, :]
+                attn_chunk = (q_chunk @ k.transpose(-2, -1)) * self.scale
+                attn_chunk = attn_chunk.softmax(dim=-1)
+                out_chunk = (attn_chunk @ v).transpose(-2, -1)  # [B, heads, head_dim, chunk]
+                out_chunks.append(out_chunk)
+            out = torch.cat(out_chunks, dim=3).reshape(B, C, H, W)
         out = self.proj(out)
         return x + out
 

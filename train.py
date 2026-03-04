@@ -4,16 +4,18 @@ MoE-DiReF 训练入口：L_rec + L_perc + L_adv (WGAN-GP) + L_path，cosine 学�
 
 import os
 import sys
+import argparse
+import csv
+from datetime import datetime
 
 # 确保项目根目录在 Python 路径中，避免 ModuleNotFoundError
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-import argparse
-
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from utils.config import get_config
@@ -69,6 +71,34 @@ def main():
 
     device = torch.device(args.device)
     os.makedirs(args.save_dir, exist_ok=True)
+
+    # 日志：CSV + TensorBoard
+    log_csv_path = os.path.join(args.save_dir, "train_log.csv")
+    is_new_log = not os.path.exists(log_csv_path)
+    log_file = open(log_csv_path, "a", newline="")
+    log_writer = csv.writer(log_file)
+    if is_new_log:
+        log_writer.writerow(
+            [
+                "step",
+                "epoch",
+                "rec",
+                "perc",
+                "adv",
+                "path",
+                "total",
+                "lr_g",
+                "lr_d",
+            ]
+        )
+
+    tb_log_dir = os.path.join(args.save_dir, "tb")
+    writer = SummaryWriter(log_dir=tb_log_dir)
+    writer.add_text(
+        "config",
+        f"config={args.config}, override={args.override}, synthetic={args.synthetic}, "
+        f"batch_size={batch_size}, image_size={image_size}",
+    )
 
     if args.synthetic:
         dataset = SyntheticInpaintingDataset(
@@ -160,6 +190,32 @@ def main():
             sched_d.step()
             global_step += 1
 
+            if global_step % log_every == 0:
+                lr_g = opt_g.param_groups[0]["lr"]
+                lr_d = opt_d.param_groups[0]["lr"]
+                log_writer.writerow(
+                    [
+                        global_step,
+                        epoch + 1,
+                        L_rec.item(),
+                        L_perc.item(),
+                        L_g_adv.item(),
+                        loss_path.item(),
+                        L_total.item(),
+                        lr_g,
+                        lr_d,
+                    ]
+                )
+                log_file.flush()
+
+                writer.add_scalar("loss/rec", L_rec.item(), global_step)
+                writer.add_scalar("loss/perc", L_perc.item(), global_step)
+                writer.add_scalar("loss/adv", L_g_adv.item(), global_step)
+                writer.add_scalar("loss/path", loss_path.item(), global_step)
+                writer.add_scalar("loss/total", L_total.item(), global_step)
+                writer.add_scalar("lr/g", lr_g, global_step)
+                writer.add_scalar("lr/d", lr_d, global_step)
+
             pbar.set_postfix(
                 rec=f"{L_rec.item():.4f}",
                 path=f"{loss_path.item():.4f}",
@@ -175,7 +231,8 @@ def main():
                 "opt_d": opt_d.state_dict(),
             }, path)
             print(f"Saved {path}")
-
+    log_file.close()
+    writer.close()
     print("Training done.")
 
 
