@@ -4,6 +4,12 @@ MoE-DiReF 推理与评估：加载 checkpoint、跑测试集、计算 PSNR/SSIM/
 
 import os
 import sys
+
+# 确保项目根目录在 Python 路径中
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import argparse
 from typing import Optional
 
