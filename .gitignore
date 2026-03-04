@@ -15,8 +15,11 @@ ENV/
 *.swp
 *.swo
 
-# 数据与输出
-data/
+# 数据与输出（保留 data/ 包代码，只忽略数据文件目录）
+data/celeba_hq/
+data/celeba/
+data/img_align_celeba/
+data/images/
 checkpoints/
 *.pt
 *.pth
