@@ -1,0 +1,41 @@
+# MoE-DiReF 默认配置（对应论文 IV-A, III-E）
+
+data:
+  name: celeba_hq
+  root: ./data/celeba_hq
+  image_size: 256
+  mask_range: [0.2, 0.8]   # 缺失率范围 20%–80%
+  mask_type: random        # random | rectangle | irregular
+  num_workers: 4
+  train_split: 0.95        # 95% 训练，5% 测试
+
+model:
+  in_channels: 3
+  latent_dim: 64
+  num_experts: 4
+  rf_steps_train: 50
+  rf_steps_infer: 10
+
+reme:
+  dofe_branches: [stride, maxpool, avgpool]
+  upfu_use_stn: true
+
+train:
+  batch_size: 16
+  epochs: 2000
+  lr_max: 2.0e-4
+  lr_min: 5.0e-6
+  beta1: 0.9
+  beta2: 0.999
+  lambda_rec: 1.0
+  lambda_adv: 0.1
+  lambda_perc: 0.1
+  lambda_path: 1.0
+  lambda_gp: 10.0
+  save_every: 100
+  log_every: 10
+  rf_steps_train: 10
+
+inference:
+  batch_size: 1
+  rf_steps: 10

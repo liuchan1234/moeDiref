@@ -1,0 +1,14 @@
+# 敦煌壁画场景配置（在 default 基础上覆盖）
+
+data:
+  name: dunhuang
+  root: ./data/dunhuang_murals
+  image_size: 256
+  mask_range: [0.2, 0.8]
+  mask_type: irregular
+  num_workers: 4
+  train_split: 0.95
+
+train:
+  batch_size: 8
+  epochs: 500

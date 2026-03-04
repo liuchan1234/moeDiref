@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 数据与输出
+data/
+checkpoints/
+*.pt
+*.pth
+outputs/
+logs/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 可选：大文件/论文 PDF（若不想提交可取消注释）
+# *.pdf
