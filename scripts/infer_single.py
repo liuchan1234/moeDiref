@@ -105,7 +105,7 @@ def main():
         damaged = _tensor_to_uint8_rgb(I_fus, h, w)
         Image.fromarray(damaged).save(os.path.join(args.save_diagram, "1_damaged_input.png"))
 
-        # 2. 二值掩码 (Binary Mask)：有原图尺寸则用，否则用模型尺寸再 resize
+        # 2. 二值掩码 (Binary Mask)：损坏=黑、保留=白，更直观
         if mask_np_orig is not None:
             m_uint8 = (np.clip(mask_np_orig, 0, 1) * 255).astype(np.uint8)
         else:
@@ -113,6 +113,8 @@ def main():
             m_uint8 = (np.clip(m, 0, 1) * 255).astype(np.uint8)
             if (m_uint8.shape[0], m_uint8.shape[1]) != (h, w):
                 m_uint8 = np.array(Image.fromarray(m_uint8).resize((w, h), Image.NEAREST))
+        # 显示用：损坏区域=黑(0)、保留=白(255)，与常见“洞”的直觉一致
+        m_uint8 = 255 - m_uint8
         mask_rgb = np.stack([m_uint8, m_uint8, m_uint8], axis=-1)
         Image.fromarray(mask_rgb).save(os.path.join(args.save_diagram, "2_binary_mask.png"))
 
