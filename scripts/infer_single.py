@@ -58,6 +58,7 @@ def main():
         I_gt = I_gt.unsqueeze(0)
     I_gt = I_gt.unsqueeze(0).to(device)
 
+    mask_np_orig = None  # 仅自动生成 mask 时为原图尺寸，用于图示
     if args.mask and os.path.isfile(args.mask):
         mask_pil = Image.open(args.mask).convert("L")
         mask_np = np.array(mask_pil)
@@ -70,13 +71,20 @@ def main():
         mask_np = np.array(mask_resized).astype(np.float32) / 255.0
         mask = torch.from_numpy(mask_np).unsqueeze(0).unsqueeze(0).to(device)
     else:
+        # 按原图尺寸生成 mask，再下采样到模型尺寸，使缺失区域随图片大小自适应
+        h_orig, w_orig = img.height, img.width
         mask_np = random_mask(
-            image_size,
-            image_size,
+            h_orig,
+            w_orig,
             mask_ratio_range=(args.mask_ratio, args.mask_ratio),
             mask_type=args.mask_type,
         )
-        mask = torch.from_numpy(mask_np).unsqueeze(0).unsqueeze(0).float().to(device)
+        mask_np_orig = mask_np.astype(np.float32)  # 保留原图尺寸，供图示等使用
+        mask_pil_small = Image.fromarray((mask_np * 255).astype(np.uint8)).resize(
+            (image_size, image_size), Image.NEAREST
+        )
+        mask_np_small = np.array(mask_pil_small).astype(np.float32) / 255.0
+        mask = torch.from_numpy(mask_np_small).unsqueeze(0).unsqueeze(0).float().to(device)
 
     I_fus = make_fused_image(I_gt, mask, noise_std=0.0)
     model = load_model(args.checkpoint, device, cfg)
@@ -97,11 +105,14 @@ def main():
         damaged = _tensor_to_uint8_rgb(I_fus, h, w)
         Image.fromarray(damaged).save(os.path.join(args.save_diagram, "1_damaged_input.png"))
 
-        # 2. 二值掩码 (Binary Mask) [1,1,H,W] -> 三通道灰度图
-        m = mask[0, 0].cpu().numpy()
-        m_uint8 = (np.clip(m, 0, 1) * 255).astype(np.uint8)
-        if (m_uint8.shape[0], m_uint8.shape[1]) != (h, w):
-            m_uint8 = np.array(Image.fromarray(m_uint8).resize((w, h), Image.NEAREST))
+        # 2. 二值掩码 (Binary Mask)：有原图尺寸则用，否则用模型尺寸再 resize
+        if mask_np_orig is not None:
+            m_uint8 = (np.clip(mask_np_orig, 0, 1) * 255).astype(np.uint8)
+        else:
+            m = mask[0, 0].cpu().numpy()
+            m_uint8 = (np.clip(m, 0, 1) * 255).astype(np.uint8)
+            if (m_uint8.shape[0], m_uint8.shape[1]) != (h, w):
+                m_uint8 = np.array(Image.fromarray(m_uint8).resize((w, h), Image.NEAREST))
         mask_rgb = np.stack([m_uint8, m_uint8, m_uint8], axis=-1)
         Image.fromarray(mask_rgb).save(os.path.join(args.save_diagram, "2_binary_mask.png"))
 
