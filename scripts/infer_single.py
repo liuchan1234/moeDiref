@@ -31,6 +31,22 @@ def _tensor_to_uint8_rgb(x: torch.Tensor, h: int = None, w: int = None) -> np.nd
     return img
 
 
+def _latent_to_uint8_rgb(z: torch.Tensor, h: int, w: int) -> np.ndarray:
+    """潜码 [1,C,H_lat,W_lat] 取前 3 通道归一化后 resize，用于“解码前”的可视化。"""
+    x = z[0].cpu().numpy()  # [C, H_lat, W_lat]
+    rgb = x[:3].transpose(1, 2, 0)  # [H_lat, W_lat, 3]
+    for c in range(3):
+        lo, hi = rgb[:, :, c].min(), rgb[:, :, c].max()
+        if hi > lo:
+            rgb[:, :, c] = (rgb[:, :, c] - lo) / (hi - lo)
+        else:
+            rgb[:, :, c] = 0.5
+    img = (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
+    if (img.shape[0], img.shape[1]) != (h, w):
+        img = np.array(Image.fromarray(img).resize((w, h), Image.BILINEAR))
+    return img
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True)
@@ -125,24 +141,29 @@ def main():
         mask_rgb = np.stack([m_uint8, m_uint8, m_uint8], axis=-1)
         Image.fromarray(mask_rgb).save(os.path.join(args.save_diagram, "2_binary_mask.png"))
 
-        # 3. Noise Latent（噪声潜码 z_1 解码）：ODE 起点，对应图示中 “Noise Latent”
+        # 3. Noise Latent（解码前）：z_1 潜码可视化，ODE 起点，对应图示中 “Noise Latent”
+        z_1 = out_dict["z_1"]
+        noise_latent_vis = _latent_to_uint8_rgb(z_1, h, w)
+        Image.fromarray(noise_latent_vis).save(os.path.join(args.save_diagram, "3_noise_latent.png"))
+
+        # 4. Noise Latent（解码后）：decoder(z_1)
         noise_img = _tensor_to_uint8_rgb(noise_decoded, h, w)
-        Image.fromarray(noise_img).save(os.path.join(args.save_diagram, "3_noise_latent_decoded.png"))
+        Image.fromarray(noise_img).save(os.path.join(args.save_diagram, "4_noise_latent_decoded.png"))
 
-        # 4. 损坏图的 latent：encoder(I_fus) 再解码
+        # 5. 损坏图的 latent：encoder(I_fus) 再解码
         damaged_lat_img = _tensor_to_uint8_rgb(damaged_latent_decoded, h, w)
-        Image.fromarray(damaged_lat_img).save(os.path.join(args.save_diagram, "4_damaged_latent_decoded.png"))
+        Image.fromarray(damaged_lat_img).save(os.path.join(args.save_diagram, "5_damaged_latent_decoded.png"))
 
-        # 5. Low-res Decoded Image：decoder(Z0)，ODE 终点 Clean Latent 解码，对应图示中 “Low-res Decoded Image”
+        # 6. Low-res Decoded Image：decoder(Z0)，ODE 终点 Clean Latent 解码
         lowres_decoded = _tensor_to_uint8_rgb(I_pred, h, w)
-        Image.fromarray(lowres_decoded).save(os.path.join(args.save_diagram, "5_lowres_decoded.png"))
+        Image.fromarray(lowres_decoded).save(os.path.join(args.save_diagram, "6_lowres_decoded.png"))
 
-        # 6. Restored High-Res Image：最终恢复输出（与 5 同源，图示中经 UpFu 后为高分辨率）
+        # 7. Restored High-Res Image：最终恢复输出
         restored = _tensor_to_uint8_rgb(I_pred, h, w)
-        Image.fromarray(restored).save(os.path.join(args.save_diagram, "6_restored_highres.png"))
+        Image.fromarray(restored).save(os.path.join(args.save_diagram, "7_restored_highres.png"))
 
         print("Diagram outputs saved to", args.save_diagram)
-        print("  1_damaged_input.png, 2_binary_mask.png, 3_noise_latent_decoded.png, 4_damaged_latent_decoded.png, 5_lowres_decoded.png, 6_restored_highres.png")
+        print("  1_damaged_input.png, 2_binary_mask.png, 3_noise_latent.png, 4_noise_latent_decoded.png, 5_damaged_latent_decoded.png, 6_lowres_decoded.png, 7_restored_highres.png")
     else:
         with torch.no_grad():
             I_pred = model.infer(I_fus, mask, num_steps=args.num_steps, solver=args.solver)
