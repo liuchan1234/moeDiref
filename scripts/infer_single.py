@@ -3,6 +3,7 @@
 用法：
   python scripts/infer_single.py --checkpoint ckpt.pt --image img.png --mask mask.png --output out.png
   python scripts/infer_single.py --checkpoint ckpt.pt --image img.png --output out.png  # 自动生成随机 mask
+  python scripts/infer_single.py --checkpoint ckpt.pt --image img.png --save_diagram ./diagram  # 保存图示四件套
 """
 
 import os
@@ -21,6 +22,15 @@ from data.transforms import get_eval_transforms
 from data.mask import random_mask, make_fused_image
 
 
+def _tensor_to_uint8_rgb(x: torch.Tensor, h: int = None, w: int = None) -> np.ndarray:
+    """[-1,1] [B,C,H,W] -> [H,W,3] uint8，可选 resize 到 (h,w)。"""
+    img = (x[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 0.5
+    img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
+    if h is not None and w is not None and (img.shape[0], img.shape[1]) != (h, w):
+        img = np.array(Image.fromarray(img).resize((w, h), Image.BILINEAR))
+    return img
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, required=True)
@@ -32,6 +42,7 @@ def main():
     parser.add_argument("--solver", type=str, default="euler")
     parser.add_argument("--mask_ratio", type=float, default=0.5, help="未提供 mask 时随机 mask 的缺失率")
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--save_diagram", type=str, default=None, help="保存图示四件套的目录：损坏输入、二值掩码、噪声潜码、恢复高分辨率输出")
     args = parser.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -63,9 +74,46 @@ def main():
 
     I_fus = make_fused_image(I_gt, mask, noise_std=0.0)
     model = load_model(args.checkpoint, device, cfg)
-    with torch.no_grad():
-        I_pred = model.infer(I_fus, mask, num_steps=args.num_steps, solver=args.solver)
-    I_pred = torch.clamp(I_pred, -1.0, 1.0)
+
+    if args.save_diagram:
+        # 生成图示四件套：损坏输入、二值掩码、噪声潜码、恢复高分辨率输出
+        with torch.no_grad():
+            out_dict = model.infer_with_intermediates(
+                I_fus, mask, num_steps=args.num_steps, solver=args.solver
+            )
+        I_pred = torch.clamp(out_dict["I_pred"], -1.0, 1.0)
+        noise_decoded = torch.clamp(out_dict["noise_decoded"], -1.0, 1.0)
+
+        os.makedirs(args.save_diagram, exist_ok=True)
+        h, w = img.height, img.width
+
+        # 1. 损坏输入 (Damaged Image)
+        damaged = _tensor_to_uint8_rgb(I_fus, h, w)
+        Image.fromarray(damaged).save(os.path.join(args.save_diagram, "1_damaged_input.png"))
+
+        # 2. 二值掩码 (Binary Mask) [1,1,H,W] -> 三通道灰度图
+        m = mask[0, 0].cpu().numpy()
+        m_uint8 = (np.clip(m, 0, 1) * 255).astype(np.uint8)
+        if (m_uint8.shape[0], m_uint8.shape[1]) != (h, w):
+            m_uint8 = np.array(Image.fromarray(m_uint8).resize((w, h), Image.NEAREST))
+        mask_rgb = np.stack([m_uint8, m_uint8, m_uint8], axis=-1)
+        Image.fromarray(mask_rgb).save(os.path.join(args.save_diagram, "2_binary_mask.png"))
+
+        # 3. 噪声潜码 (Noise Latent)：解码 z_1 得到的可视化
+        noise_img = _tensor_to_uint8_rgb(noise_decoded, h, w)
+        Image.fromarray(noise_img).save(os.path.join(args.save_diagram, "3_noise_latent_decoded.png"))
+
+        # 4. 恢复高分辨率输出 (Restored High-Res Image)
+        restored = _tensor_to_uint8_rgb(I_pred, h, w)
+        Image.fromarray(restored).save(os.path.join(args.save_diagram, "4_restored_highres.png"))
+
+        print("Diagram outputs saved to", args.save_diagram)
+        print("  1_damaged_input.png, 2_binary_mask.png, 3_noise_latent_decoded.png, 4_restored_highres.png")
+    else:
+        with torch.no_grad():
+            I_pred = model.infer(I_fus, mask, num_steps=args.num_steps, solver=args.solver)
+        I_pred = torch.clamp(I_pred, -1.0, 1.0)
+
     out = ((I_pred[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 0.5 * 255).clip(0, 255).astype(np.uint8)
     out_pil = Image.fromarray(out)
     if out_pil.size != (img.width, img.height):

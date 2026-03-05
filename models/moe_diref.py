@@ -192,3 +192,26 @@ class MoEDiReF(nn.Module):
         z_1 = torch.randn_like(z_0_dummy, device=image_fused.device, dtype=image_fused.dtype)
         z_0 = self.sample_with_reme(z_1, z_c, z_s, num_steps=num_steps, solver=solver)
         return self.decoder(z_0)
+
+    @torch.no_grad()
+    def infer_with_intermediates(
+        self,
+        image_fused: torch.Tensor,
+        mask: torch.Tensor,
+        num_steps: int = 10,
+        solver: str = "euler",
+    ) -> Dict[str, Any]:
+        """推理并返回中间量，用于图示：损坏输入、二值掩码、噪声潜码、恢复输出。"""
+        z_c, z_s = self.structure_branch(image_fused, mask)
+        z_0_dummy = self.encoder(image_fused)
+        z_1 = torch.randn_like(z_0_dummy, device=image_fused.device, dtype=image_fused.dtype)
+        z_0 = self.sample_with_reme(z_1, z_c, z_s, num_steps=num_steps, solver=solver)
+        I_pred = self.decoder(z_0)
+        # 噪声潜码可视化：用 decoder 解码 z_1 得到“噪声图像”
+        noise_decoded = self.decoder(z_1)
+        return {
+            "I_pred": I_pred,
+            "z_1": z_1,
+            "z_0": z_0,
+            "noise_decoded": noise_decoded,
+        }
