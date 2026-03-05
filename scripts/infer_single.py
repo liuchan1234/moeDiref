@@ -40,7 +40,8 @@ def main():
     parser.add_argument("--config", type=str, default="configs/default.yaml")
     parser.add_argument("--num_steps", type=int, default=10)
     parser.add_argument("--solver", type=str, default="euler")
-    parser.add_argument("--mask_ratio", type=float, default=0.5, help="未提供 mask 时随机 mask 的缺失率")
+    parser.add_argument("--mask_ratio", type=float, default=0.4, help="未提供 mask 时随机 mask 的缺失率（默认 40%%）")
+    parser.add_argument("--mask_type", type=str, default="irregular", choices=["random", "rectangle", "irregular"], help="未提供 mask 时的形状：irregular=不规则，rectangle=矩形，random=随机二选一")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--save_diagram", type=str, default=None, help="保存图示四件套的目录：损坏输入、二值掩码、噪声潜码、恢复高分辨率输出")
     args = parser.parse_args()
@@ -69,7 +70,12 @@ def main():
         mask_np = np.array(mask_resized).astype(np.float32) / 255.0
         mask = torch.from_numpy(mask_np).unsqueeze(0).unsqueeze(0).to(device)
     else:
-        mask_np = random_mask(image_size, image_size, mask_ratio_range=(args.mask_ratio, args.mask_ratio))
+        mask_np = random_mask(
+            image_size,
+            image_size,
+            mask_ratio_range=(args.mask_ratio, args.mask_ratio),
+            mask_type=args.mask_type,
+        )
         mask = torch.from_numpy(mask_np).unsqueeze(0).unsqueeze(0).float().to(device)
 
     I_fus = make_fused_image(I_gt, mask, noise_std=0.0)
