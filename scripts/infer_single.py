@@ -40,7 +40,7 @@ def main():
     parser.add_argument("--config", type=str, default="configs/default.yaml")
     parser.add_argument("--num_steps", type=int, default=10)
     parser.add_argument("--solver", type=str, default="euler")
-    parser.add_argument("--mask_ratio", type=float, default=0.4, help="未提供 mask 时随机 mask 的缺失率（默认 40%%）")
+    parser.add_argument("--mask_ratio", type=float, default=0.25, help="未提供 mask 时随机 mask 的缺失率（默认 25%%）")
     parser.add_argument("--mask_type", type=str, default="irregular", choices=["random", "rectangle", "irregular"], help="未提供 mask 时的形状：irregular=不规则，rectangle=矩形，random=随机二选一")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--save_diagram", type=str, default=None, help="保存图示四件套的目录：损坏输入、二值掩码、噪声潜码、恢复高分辨率输出")
@@ -101,20 +101,26 @@ def main():
         os.makedirs(args.save_diagram, exist_ok=True)
         h, w = img.height, img.width
 
-        # 1. 损坏输入 (Damaged Image)
+        # 1. 损坏输入 (Damaged Image)：缺失区在模型里是 0（[-1,1]）→ 转成图会变灰，图示里改为黑更直观
         damaged = _tensor_to_uint8_rgb(I_fus, h, w)
-        Image.fromarray(damaged).save(os.path.join(args.save_diagram, "1_damaged_input.png"))
-
-        # 2. 二值掩码 (Binary Mask)：损坏=黑、保留=白，更直观
         if mask_np_orig is not None:
-            m_uint8 = (np.clip(mask_np_orig, 0, 1) * 255).astype(np.uint8)
+            mask_vis = (mask_np_orig > 0.5).astype(np.uint8)
         else:
             m = mask[0, 0].cpu().numpy()
-            m_uint8 = (np.clip(m, 0, 1) * 255).astype(np.uint8)
+            m_pil = Image.fromarray((np.clip(m, 0, 1) * 255).astype(np.uint8)).resize((w, h), Image.NEAREST)
+            mask_vis = (np.array(m_pil) > 127).astype(np.uint8)
+        damaged[mask_vis > 0] = 0  # 缺失区图示为黑色
+        Image.fromarray(damaged).save(os.path.join(args.save_diagram, "1_damaged_input.png"))
+
+        # 2. 二值掩码 (Binary Mask)：损坏=黑、保留=白，严格 0/255 避免灰边
+        if mask_np_orig is not None:
+            m_uint8 = (mask_np_orig > 0.5).astype(np.uint8) * 255
+        else:
+            m = mask[0, 0].cpu().numpy()
+            m_uint8 = (m > 0.5).astype(np.uint8) * 255
             if (m_uint8.shape[0], m_uint8.shape[1]) != (h, w):
                 m_uint8 = np.array(Image.fromarray(m_uint8).resize((w, h), Image.NEAREST))
-        # 显示用：损坏区域=黑(0)、保留=白(255)，与常见“洞”的直觉一致
-        m_uint8 = 255 - m_uint8
+        m_uint8 = 255 - m_uint8  # 显示：损坏=黑(0)、保留=白(255)
         mask_rgb = np.stack([m_uint8, m_uint8, m_uint8], axis=-1)
         Image.fromarray(mask_rgb).save(os.path.join(args.save_diagram, "2_binary_mask.png"))
 
