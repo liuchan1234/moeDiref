@@ -97,6 +97,7 @@ def main():
             )
         I_pred = torch.clamp(out_dict["I_pred"], -1.0, 1.0)
         noise_decoded = torch.clamp(out_dict["noise_decoded"], -1.0, 1.0)
+        damaged_latent_decoded = torch.clamp(out_dict["damaged_latent_decoded"], -1.0, 1.0)
 
         os.makedirs(args.save_diagram, exist_ok=True)
         h, w = img.height, img.width
@@ -124,16 +125,24 @@ def main():
         mask_rgb = np.stack([m_uint8, m_uint8, m_uint8], axis=-1)
         Image.fromarray(mask_rgb).save(os.path.join(args.save_diagram, "2_binary_mask.png"))
 
-        # 3. 噪声潜码 (Noise Latent)：解码 z_1 得到的可视化
+        # 3. Noise Latent（噪声潜码 z_1 解码）：ODE 起点，对应图示中 “Noise Latent”
         noise_img = _tensor_to_uint8_rgb(noise_decoded, h, w)
         Image.fromarray(noise_img).save(os.path.join(args.save_diagram, "3_noise_latent_decoded.png"))
 
-        # 4. 恢复高分辨率输出 (Restored High-Res Image)
+        # 4. 损坏图的 latent：encoder(I_fus) 再解码
+        damaged_lat_img = _tensor_to_uint8_rgb(damaged_latent_decoded, h, w)
+        Image.fromarray(damaged_lat_img).save(os.path.join(args.save_diagram, "4_damaged_latent_decoded.png"))
+
+        # 5. Low-res Decoded Image：decoder(Z0)，ODE 终点 Clean Latent 解码，对应图示中 “Low-res Decoded Image”
+        lowres_decoded = _tensor_to_uint8_rgb(I_pred, h, w)
+        Image.fromarray(lowres_decoded).save(os.path.join(args.save_diagram, "5_lowres_decoded.png"))
+
+        # 6. Restored High-Res Image：最终恢复输出（与 5 同源，图示中经 UpFu 后为高分辨率）
         restored = _tensor_to_uint8_rgb(I_pred, h, w)
-        Image.fromarray(restored).save(os.path.join(args.save_diagram, "4_restored_highres.png"))
+        Image.fromarray(restored).save(os.path.join(args.save_diagram, "6_restored_highres.png"))
 
         print("Diagram outputs saved to", args.save_diagram)
-        print("  1_damaged_input.png, 2_binary_mask.png, 3_noise_latent_decoded.png, 4_restored_highres.png")
+        print("  1_damaged_input.png, 2_binary_mask.png, 3_noise_latent_decoded.png, 4_damaged_latent_decoded.png, 5_lowres_decoded.png, 6_restored_highres.png")
     else:
         with torch.no_grad():
             I_pred = model.infer(I_fus, mask, num_steps=args.num_steps, solver=args.solver)
